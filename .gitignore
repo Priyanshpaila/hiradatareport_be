@@ -1,0 +1,55 @@
+# Node (all packages)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment & secrets (keep examples)
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Build outputs & coverage (any package)
+dist/
+build/
+coverage/
+.nyc_output/
+**/dist/
+**/build/
+**/coverage/
+**/.nyc_output/
+
+# Caches & temp
+.vite/
+.cache/
+.eslintcache
+.tmp/
+temp/
+tmp/
+
+# Logs
+logs/
+*.log
+
+# Generated data/artifacts
+uploads/
+storage/
+exports/
+reports/
+screenshots/
+
+# OS / Editor junk
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Docker (optional local overrides)
+docker-compose.override.yml
