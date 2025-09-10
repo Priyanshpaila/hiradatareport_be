@@ -100,4 +100,36 @@ r.get("/my-access", requireAuth, async (req, res) => {
   res.json(grants);
 });
 
+
+// REMOVE a user's access to a division (delete the grant doc entirely)
+// DELETE /access/grant/:userId/:divisionId
+r.delete(
+  "/grant/:userId/:divisionId",
+  requireAuth,
+  requireRole(["superadmin"]),
+  async (req, res) => {
+    const { userId, divisionId } = req.params;
+    if (!isId(userId) || !isId(divisionId)) {
+      return res.status(400).json({ message: "Valid userId and divisionId are required" });
+    }
+
+    const removed = await AccessGrant.findOneAndDelete({
+      user: userId,
+      division: divisionId,
+    });
+
+    if (!removed) {
+      return res.status(404).json({ message: "Grant not found" });
+    }
+
+    res.json({
+      message: "Division access removed for user",
+      userId,
+      divisionId,
+      grantId: removed._id,
+    });
+  }
+);
+
+
 export default r;
