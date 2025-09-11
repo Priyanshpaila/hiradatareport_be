@@ -55,7 +55,14 @@ function buildMonthlyPipeline({
   const dateExpr = dateField
     ? {
         $ifNull: [
-          { $convert: { input: `$data.${dateField}`, to: "date", onError: null, onNull: null } },
+          {
+            $convert: {
+              input: `$data.${dateField}`,
+              to: "date",
+              onError: null,
+              onNull: null,
+            },
+          },
           "$createdAt",
         ],
       }
@@ -91,7 +98,9 @@ function buildMonthlyPipeline({
   const groupStage =
     mode === "avg"
       ? { $group: { _id: "$month", total: { $avg: "$y" }, count: { $sum: 1 } } }
-      : { $group: { _id: "$month", total: { $sum: "$y" }, count: { $sum: 1 } } };
+      : {
+          $group: { _id: "$month", total: { $sum: "$y" }, count: { $sum: 1 } },
+        };
 
   return [matchStage, projectStage, groupStage, { $sort: { _id: 1 } }];
 }
@@ -136,12 +145,18 @@ r.get(
 
     const agg = await Submission.aggregate(pipeline);
     // Normalize shape
-    const mapped = agg.map((r) => ({ month: r._id, total: r.total, count: r.count }));
+    const mapped = agg.map((r) => ({
+      month: r._id,
+      total: r.total,
+      count: r.count,
+    }));
 
     if (fill === "1") {
       const baseline = monthsBackList(m);
       const map = new Map(mapped.map((r) => [r.month, r]));
-      const filled = baseline.map((mm) => map.get(mm) || { month: mm, total: 0, count: 0 });
+      const filled = baseline.map(
+        (mm) => map.get(mm) || { month: mm, total: 0, count: 0 }
+      );
       return res.json(filled);
     }
 
@@ -191,11 +206,111 @@ r.get(
     if (fill === "1") {
       const baseline = monthsBackList(m);
       const map = new Map(mapped.map((r) => [r.month, r]));
-      const filled = baseline.map((mm) => map.get(mm) || { month: mm, total: 0, count: 0 });
+      const filled = baseline.map(
+        (mm) => map.get(mm) || { month: mm, total: 0, count: 0 }
+      );
       return res.json(filled);
     }
 
     res.json(mapped);
+  }
+);
+
+// ADD: full rows endpoint (put below your existing routes)
+r.get(
+  "/:divisionId/:screenId/rows",
+  requireAuth,
+  requireDivisionScreenAccess,
+  async (req, res) => {
+    const { divisionId, screenId } = req.params;
+    const {
+      page = 1,
+      limit = 200, // default page size
+      sort = "desc", // "asc" | "desc" by date
+      dateField = null, // e.g. "txnDate" inside data
+      since = null, // ISO date string, inclusive
+      until = null, // ISO date string, inclusive
+      tz = null, // not needed for raw rows, but kept for parity
+    } = req.query;
+
+    const p = clampInt(page, 1, 100000, 1);
+    const lim = clampInt(limit, 1, 1000, 200); // hard cap to protect server
+    const sortDir = String(sort).toLowerCase() === "asc" ? 1 : -1;
+
+    const sinceDate = since ? new Date(since) : null;
+    const untilDate = until ? new Date(until) : null;
+
+    // compute "date to sort/filter by": data[dateField] -> Date, else createdAt
+    const dateExpr = dateField
+      ? {
+          $ifNull: [
+            {
+              $convert: {
+                input: `$data.${dateField}`,
+                to: "date",
+                onError: null,
+                onNull: null,
+              },
+            },
+            "$createdAt",
+          ],
+        }
+      : "$createdAt";
+
+    const pipeline = [
+      {
+        $match: {
+          division: new mongoose.Types.ObjectId(divisionId),
+          screen: new mongoose.Types.ObjectId(screenId),
+        },
+      },
+      { $addFields: { _date: dateExpr } },
+    ];
+
+    // optional date window on _date
+    const dateAnd = [];
+    if (sinceDate) dateAnd.push({ $gte: ["$_date", sinceDate] });
+    if (untilDate) dateAnd.push({ $lte: ["$_date", untilDate] });
+    if (dateAnd.length) pipeline.push({ $match: { $expr: { $and: dateAnd } } });
+
+    // populate submittedBy's name via lookup (works inside aggregate)
+    pipeline.push(
+      {
+        $lookup: {
+          from: "users",
+          localField: "submittedBy",
+          foreignField: "_id",
+          as: "u",
+        },
+      },
+      {
+        $addFields: {
+          submittedByName: {
+            $ifNull: [{ $arrayElemAt: ["$u.fullName", 0] }, null],
+          },
+        },
+      },
+      { $project: { u: 0 } },
+
+      // keep a stable sort
+      { $sort: { _date: sortDir, _id: sortDir } },
+
+      // pagination
+      {
+        $facet: {
+          total: [{ $count: "count" }],
+          items: [{ $skip: (p - 1) * lim }, { $limit: lim }],
+        },
+      }
+    );
+
+    const agg = await Submission.aggregate(pipeline);
+    const total = agg?.[0]?.total?.[0]?.count || 0;
+    const items = agg?.[0]?.items || [];
+
+    // Final shape: each item includes full data + useful meta
+    // { _id, data, formVersion, createdAt, updatedAt, submittedBy, submittedByName }
+    return res.json({ page: p, limit: lim, total, items });
   }
 );
 
