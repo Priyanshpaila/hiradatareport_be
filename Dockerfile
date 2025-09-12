@@ -1,8 +1,7 @@
 # Use a lightweight Node.js base image
 FROM node:20-alpine
 
-# Install dependencies without devDependencies
-RUN npm install --omit=dev
+
 
 # App env (you can still override at runtime with --env or --env-file)
 ENV PORT=8080
